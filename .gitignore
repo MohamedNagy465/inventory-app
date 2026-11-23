@@ -39,3 +39,25 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Local database files
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+
+# Backups and exports
+/backups/
+/exports/
+
+# Build and dependencies
+/node_modules/
+/.next/

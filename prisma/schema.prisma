@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  password String
+  role     String @default("EMPLOYEE") // ADMIN | EMPLOYEE | SELLER | REP
+
+  invoices       Invoice[]
+  orders         Order[]
+  stockMovements StockMovement[]
+  payments       Payment[]       @relation("RepPayments")
+  purchases      Purchase[]
+  shiftReports   ShiftReport[]
+  shiftSessions  ShiftSession[]
+  expenses       Expense[]
+
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id         Int     @id @default(autoincrement())
+  name       String
+  barcode    String? @unique
+  price      Float
+  costPrice  Float   @default(0)
+  stock      Int     @default(0)
+  lowStockAt Int     @default(5)
+
+  items          InvoiceItem[]
+  orderItems     OrderItem[]
+  stockMovements StockMovement[]
+  purchaseItems  PurchaseItem[]
+}
+
+model Customer {
+  id    Int     @id @default(autoincrement())
+  name  String
+  phone String?
+
+  invoices Invoice[]
+  orders   Order[]
+  payments Payment[]
+}
+
+model Invoice {
+  id            Int      @id @default(autoincrement())
+  date          DateTime @default(now())
+  total         Float    @default(0) // الإجمالي النهائي بعد الخصم
+  discount      Float    @default(0) // قيمة الخصم الممنوح
+  paidAmount    Float    @default(0)
+  paymentType   String   @default("CASH") // CASH | CREDIT | HALF_CREDIT
+  paymentMethod String? // CASH | WALLET | TRANSFER
+
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  items    InvoiceItem[]
+  order    Order?
+  payments Payment[]
+}
+
+model InvoiceItem {
+  id        Int     @id @default(autoincrement())
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  quantity  Int
+  unitPrice Float
+  unitCost  Float @default(0) // تكلفة الوحدة وقت إصدار الفاتورة
+}
+
+model Order {
+  id        Int      @id @default(autoincrement())
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  note      String?
+  createdAt DateTime @default(now())
+
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  repId Int
+  rep   User @relation(fields: [repId], references: [id])
+
+  invoiceId Int?     @unique
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  items OrderItem[]
+}
+
+model OrderItem {
+  id      Int   @id @default(autoincrement())
+  orderId Int
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  quantity Int
+}
+
+model StockMovement {
+  id            Int     @id @default(autoincrement())
+  type          String // IN | OUT | ADJUSTMENT | RETURN
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  note          String?
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  // ربط حركة المخزون بفاتورة الشراء عند وجودها
+  purchaseId Int?
+  purchase   Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([purchaseId])
+}
+
+model Payment {
+  id            Int      @id @default(autoincrement())
+  amount        Float
+  note          String?
+  paymentMethod String? // CASH | WALLET | TRANSFER
+  createdAt     DateTime @default(now())
+
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  repId Int
+  rep   User @relation("RepPayments", fields: [repId], references: [id], onDelete: Restrict)
+
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([repId])
+  @@index([createdAt])
+}
+
+// فاتورة شراء من المورد
+model Purchase {
+  id                Int      @id @default(autoincrement())
+  supplierName      String?
+  supplierInvoiceNo String?
+  date              DateTime @default(now())
+  total             Float    @default(0)
+  note              String?
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+
+  items          PurchaseItem[]
+  stockMovements StockMovement[]
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([userId])
+}
+
+// المنتجات والكميات وأسعار الشراء داخل فاتورة التوريد
+model PurchaseItem {
+  id Int @id @default(autoincrement())
+
+  purchaseId Int
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  quantity Int
+  unitCost Float
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+// الوردية المفتوحة: بتبدأ برصيد الدرج وبتتقفل بتقرير
+model ShiftSession {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  openingCash Float
+  openedAt    DateTime  @default(now())
+  closedAt    DateTime?
+
+  @@index([userId, closedAt])
+}
+
+model ShiftReport {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id])
+  periodStart     DateTime
+  closedAt        DateTime @default(now())
+  invoiceCount    Int
+  totalSales      Float
+  cashSales       Float
+  halfCreditSales Float
+  creditSales     Float
+  openingCash     Float    @default(0) // رصيد بداية الدرج
+  expectedCash    Float    @default(0) // المفروض في الدرج = البداية + التحصيل
+  collected       Float // المتحصل نقداً خلال الوردية
+  creditAmount    Float // المتبقي آجل
+  countedCash     Float? // اللي عدّه البائع فعلاً
+  difference      Float? // الفعلي ناقص المفروض
+  note            String?
+}
+
+// المصروفات
+model Expense {
+  id          Int      @id @default(autoincrement())
+  amount      Float
+  category    String
+  description String?
+  date        DateTime @default(now())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([category])
+  @@index([userId])
+}

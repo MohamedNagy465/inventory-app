@@ -462,7 +462,7 @@ export default function SellerPOS({
     setCustomerId("");
     setDiscount("");
     setPayMode("cash");
-    setMethod("cash");
+    setMethod("CASH");
     setPaid("");
     setResult(null);
   }
@@ -606,7 +606,7 @@ export default function SellerPOS({
         setCustomerId("");
         setDiscount("");
         setPayMode("cash");
-        setMethod("cash");
+        setMethod("CASH");
         setPaid("");
         setSearch("");
         setBarcode("");

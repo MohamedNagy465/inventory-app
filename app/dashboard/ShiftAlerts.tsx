@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   BellRing,
+  CheckCircle2,
   Volume2,
   VolumeX,
   ClipboardList,

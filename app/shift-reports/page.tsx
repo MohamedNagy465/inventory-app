@@ -53,8 +53,8 @@ function ReportCard({
     creditAmount: number;
     note: string | null;
     totalSales: number;
-    countedCash: number;
-    difference: number;
+    countedCash: number | null;
+    difference: number | null;
     user: { name: string };
   };
   isAdmin: boolean;
@@ -133,7 +133,7 @@ function ReportCard({
             className="mt-1 break-all text-base font-extrabold text-gray-900"
             dir="ltr"
           >
-            {fmt(report.countedCash)}
+            {report.countedCash === null ? "—" : fmt(report.countedCash)}
           </p>
         </div>
       </div>
@@ -180,8 +180,8 @@ function ReportRow({
     creditAmount: number;
     note: string | null;
     totalSales: number;
-    countedCash: number;
-    difference: number;
+    countedCash: number | null;
+    difference: number | null;
     user: { name: string };
   };
   isAdmin: boolean;
@@ -241,7 +241,7 @@ function ReportRow({
             className="mt-1 font-bold text-gray-900"
             dir="ltr"
           >
-            {fmt(report.countedCash)}
+            {report.countedCash === null ? "—" : fmt(report.countedCash)}
           </p>
         </div>
 

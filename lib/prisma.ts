@@ -14,19 +14,25 @@ function getDatabaseUrl(): string {
     );
   }
 
-  // Resolve relative SQLite URLs from the project root, preserving the
-  // current local database location. Absolute URLs such as file:/data/app.db
-  // are kept unchanged for persistent hosting volumes.
-  if (
-    configuredUrl.startsWith("file:./") ||
-    configuredUrl.startsWith("file:../")
-  ) {
-    const relativePath = configuredUrl.slice("file:".length);
-    const absolutePath = path
-      .resolve(process.cwd(), relativePath)
-      .replace(/\\/g, "/");
+  // Prisma resolves relative SQLite URLs from the directory containing
+  // prisma/schema.prisma. Keep the runtime client consistent with that rule.
+  // For example, file:./dev.db must point to <project>/prisma/dev.db.
+  if (configuredUrl.startsWith("file:")) {
+    const filePart = configuredUrl.slice("file:".length);
+    const queryIndex = filePart.indexOf("?");
+    const configuredPath =
+      queryIndex >= 0 ? filePart.slice(0, queryIndex) : filePart;
+    const query = queryIndex >= 0 ? filePart.slice(queryIndex) : "";
 
-    return `file:${absolutePath}`;
+    // Absolute paths (such as Railway's file:/data/inventory.db) are
+    // already explicit and must not be resolved relative to the project.
+    if (!path.isAbsolute(configuredPath)) {
+      const absolutePath = path
+        .join(process.cwd(), "prisma", configuredPath)
+        .replace(/\\/g, "/");
+
+      return `file:${absolutePath}${query}`;
+    }
   }
 
   return configuredUrl;

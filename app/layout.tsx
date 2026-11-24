@@ -7,8 +7,14 @@ import AppHeader from "./components/AppHeader";
 import Sidebar from "./components/Sidebar";
 
 export const metadata: Metadata = {
+  applicationName: "نظام المخزون",
   title: "نظام المخزون",
   description: "إدارة المخزون والمبيعات",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "نظام المخزون",
+  },
 };
 
 export default function RootLayout({

@@ -516,7 +516,8 @@ export default function SellerPOS({
     const methodLabel = PAY_METHODS.find((m) => m.value === method)?.label ?? "";
     printDraftInvoice({
       customerName:
-        customers.find((c) => String(c.id) === customerId)?.name ?? "بدون عميل",
+        customers.find((c) => String(c.id) === customerId)?.name ??
+        (payMode === "cash" ? "عميل نقدي" : "بدون عميل"),
       payLabel: paidNum > 0 ? `${modeLabel} · ${methodLabel}` : modeLabel,
       lines: lines.map(({ product: p, quantity }) => ({
         name: p.name,
@@ -586,6 +587,12 @@ export default function SellerPOS({
       const r = await createInvoice({
         customerId: customerId ? Number(customerId) : null,
         discount: discountNum,
+        paymentType:
+          payMode === "cash"
+            ? "CASH"
+            : payMode === "credit"
+              ? "CREDIT"
+              : "HALF_CREDIT",
         paidAmount: paidNum,
         // وسيلة الدفع للمبلغ المدفوع الآن (null لو البيع آجل بالكامل)
         paymentMethod: paidNum > 0 ? method : null,
@@ -596,22 +603,8 @@ export default function SellerPOS({
       });
       if (r.ok) {
         beep(true);
-        setResult({
-          ok: true,
-          text: `تم البيع بنجاح · فاتورة #${r.invoiceId} · الإجمالي ${money(r.total)}`,
-          invoiceId: r.invoiceId,
-        });
-        setSold((s) => ({ count: s.count + 1, total: s.total + r.total }));
-        setQty({});
-        setCustomerId("");
-        setDiscount("");
-        setPayMode("cash");
-        setMethod("CASH");
-        setPaid("");
-        setSearch("");
-        setBarcode("");
-        setScan(null);
-        barcodeRef.current?.focus();
+        // افتح الفاتورة النهائية واطبعها تلقائيًا بعد نجاح الحفظ.
+        window.location.assign(`/invoices/${r.invoiceId}?print=1`);
       } else {
         beep(false);
         setResult({ ok: false, text: r.error });
@@ -826,11 +819,9 @@ export default function SellerPOS({
             {result.ok && result.invoiceId && (
               <a
                 href={`/invoices/${result.invoiceId}`}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 inline-block font-semibold underline"
+                className="mt-2 inline-flex min-h-11 items-center justify-center rounded-lg bg-green-700 px-4 py-2 font-semibold text-white underline-offset-4 hover:bg-green-800"
               >
-                فتح الفاتورة للطباعة
+                فتح وطباعة الفاتورة
               </a>
             )}
           </div>
@@ -949,8 +940,8 @@ export default function SellerPOS({
             onChange={(e) => setCustomerId(e.target.value)}
             className={`${ui.input} w-full`}
           >
-            <option value="">بدون عميل</option>
-            {customers.map((c) => (
+            <option value="">عميل نقدي (افتراضي للبيع النقدي)</option>
+            {customers.filter((c) => c.name !== "عميل نقدي").map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>

@@ -1,38 +1,41 @@
-
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "../../../lib/prisma";
 import { requireRole } from "../../../lib/auth";
-import { ui } from "../../../lib/ui";
 import PrintButton from "./PrintButton";
+import AutoPrint from "./AutoPrint";
 
 const fmt = (n: number) => n.toFixed(2);
+
+const paymentLabels: Record<string, string> = {
+  CASH: "نقدي",
+  CREDIT: "آجل",
+  HALF_CREDIT: "نصف آجل",
+};
 
 async function InvoiceContent({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRole(["ADMIN", "EMPLOYEE"]);
-
+  const session = await requireRole(["ADMIN", "EMPLOYEE", "SELLER"]);
   const { id: idParam } = await params;
   const id = Number(idParam);
 
-  if (!Number.isInteger(id) || id <= 0) {
-    notFound();
-  }
+  if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const invoice = await prisma.invoice.findUnique({
-    where: { id },
+  const invoice = await prisma.invoice.findFirst({
+    where: {
+      id,
+      ...(session.role === "SELLER" ? { userId: session.userId } : {}),
+    },
     include: {
       customer: true,
       user: { select: { name: true } },
       order: { select: { id: true } },
       items: {
-        include: {
-          product: { select: { name: true } },
-        },
+        include: { product: { select: { name: true } } },
         orderBy: { id: "asc" },
       },
     },
@@ -45,223 +48,220 @@ async function InvoiceContent({
     dateStyle: "medium",
     timeStyle: "short",
   });
+  const paidAmount = Number(invoice.paidAmount ?? 0);
+  const remaining = Math.max(0, Number(invoice.total) - paidAmount);
+  const paymentLabel = paymentLabels[invoice.paymentType] ?? "غير محدد";
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-3xl">
-      {/* Actions */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
+    <div className="mx-auto w-full min-w-0 max-w-4xl">
+      <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
         <Link
-          href="/invoices"
-          className="inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-medium text-blue-600 transition hover:bg-blue-50 hover:underline"
+          href={session.role === "SELLER" ? "/invoices/seller" : "/invoices"}
+          className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
         >
-          ← رجوع للفواتير
+          {session.role === "SELLER" ? "← رجوع لنقطة البيع" : "← رجوع للفواتير"}
         </Link>
-
         <PrintButton />
       </div>
 
-      {/* Invoice */}
-      <div
-        className={`${ui.card} min-w-0 overflow-hidden print:border-0 print:p-0 print:shadow-none`}
+      <article
+        id="invoice-print-area"
+        className="mx-auto w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:max-w-none print:rounded-none print:border-0 print:shadow-none"
       >
-        {/* Header */}
-        <div className="flex min-w-0 flex-col gap-4 border-b border-gray-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-lg font-extrabold text-gray-900 sm:text-xl">
-              📦 نظام المخزون
-            </p>
+        {/* Brand and invoice number */}
+        <header className="border-b-2 border-slate-900 px-5 py-5 sm:px-8 sm:py-6 print:px-0 print:pb-4 print:pt-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="mb-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-600 print:bg-transparent print:px-0 print:py-0">
+                فاتورة بيع
+              </span>
+              <h1 className="break-words text-xl font-black tracking-tight text-slate-900 sm:text-2xl print:text-2xl">
+                الصالح للتجارة والتوزيع
+              </h1>
+              <p className="mt-1 text-xs text-slate-500 sm:text-sm">
+                نظام المخزون والمبيعات
+              </p>
+            </div>
 
-            <p className="mt-1 text-sm text-gray-500">
-              فاتورة بيع
-            </p>
+            <div className="shrink-0 text-left">
+              <p className="text-xs font-semibold text-slate-500">رقم الفاتورة</p>
+              <p className="mt-1 text-2xl font-black leading-none text-slate-900 sm:text-3xl" dir="ltr">
+                #{invoice.id}
+              </p>
+              <p className="mt-2 text-xs font-medium text-slate-500" dir="ltr">
+                {date}
+              </p>
+            </div>
           </div>
+        </header>
 
-          <div className="min-w-0 sm:text-left">
-            <p className="text-xl font-extrabold text-gray-900 sm:text-2xl">
-              فاتورة #{invoice.id}
-            </p>
-
-            <p
-              className="mt-1 text-xs text-gray-500 sm:text-sm"
-              dir="ltr"
-            >
-              {date}
-            </p>
-          </div>
-        </div>
-
-        {/* Customer and employee details */}
-        <div className="grid min-w-0 grid-cols-1 gap-3 border-b border-gray-100 py-4 sm:grid-cols-2 sm:gap-4">
-          <div className="min-w-0 rounded-xl bg-gray-50 p-3 sm:bg-transparent sm:p-0">
-            <p className="text-xs font-medium text-gray-500">
-              العميل
-            </p>
-
-            <p className="mt-1 break-words text-sm font-bold text-gray-900">
+        {/* Customer and seller information */}
+        <section className="grid grid-cols-1 gap-3 border-b border-slate-100 px-5 py-4 sm:grid-cols-2 sm:px-8 print:grid-cols-2 print:gap-6 print:px-0 print:py-4">
+          <div className="rounded-xl bg-slate-50 p-3 sm:p-4 print:rounded-none print:bg-transparent print:p-0">
+            <p className="text-[11px] font-bold tracking-wide text-slate-500">بيانات العميل</p>
+            <p className="mt-1.5 break-words text-sm font-extrabold text-slate-900">
               {invoice.customer?.name ?? "بدون عميل"}
             </p>
-
             {invoice.customer?.phone && (
-              <p className="mt-1 text-xs text-gray-500" dir="ltr">
+              <p className="mt-1 text-xs text-slate-500" dir="ltr">
                 {invoice.customer.phone}
               </p>
             )}
-          </div>
-
-          <div className="min-w-0 rounded-xl bg-gray-50 p-3 sm:bg-transparent sm:p-0">
-            <p className="text-xs font-medium text-gray-500">
-              تمت بواسطة
-            </p>
-
-            <p className="mt-1 break-words text-sm font-bold text-gray-900">
-              {invoice.user.name}
-            </p>
-
-            {invoice.order && (
-              <p className="mt-1 text-xs text-gray-400">
-                من طلب #{invoice.order.id}
+            {invoice.placeName && (
+              <p className="mt-2 break-words text-xs font-semibold text-slate-700">
+                <span className="text-slate-500">المكان: </span>
+                {invoice.placeName}
               </p>
             )}
           </div>
-        </div>
 
-        {/* Mobile products cards */}
-        <div className="space-y-3 py-4 md:hidden print:hidden">
-          <h2 className="text-sm font-bold text-gray-800">
-            أصناف الفاتورة ({invoice.items.length})
-          </h2>
+          <div className="rounded-xl bg-slate-50 p-3 sm:p-4 print:rounded-none print:bg-transparent print:p-0">
+            <p className="text-[11px] font-bold tracking-wide text-slate-500">بيانات الفاتورة</p>
+            <p className="mt-1.5 break-words text-sm font-extrabold text-slate-900">
+              {invoice.user.name}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">تم إصدار الفاتورة بواسطة</p>
+            {invoice.order && (
+              <p className="mt-2 text-xs font-semibold text-slate-600">
+                مرتبطة بالطلب رقم #{invoice.order.id}
+              </p>
+            )}
+          </div>
+        </section>
 
-          {invoice.items.map((item, index) => (
-            <div
-              key={item.id}
-              className="min-w-0 rounded-xl border border-gray-200 p-3"
-            >
-              <div className="flex min-w-0 items-start gap-2">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-xs font-bold text-blue-700">
-                  {index + 1}
-                </span>
+        {/* Items table: also used in print */}
+        <section className="px-5 py-4 sm:px-8 print:px-0 print:py-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-extrabold text-slate-900">تفاصيل الأصناف</h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-600 print:bg-transparent print:px-0">
+              {invoice.items.length} صنف
+            </span>
+          </div>
 
-                <p className="min-w-0 flex-1 break-words text-sm font-bold leading-6 text-gray-900">
-                  {item.product.name}
-                </p>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <div className="min-w-0 rounded-lg bg-gray-50 p-2">
-                  <p className="text-[11px] text-gray-400">
-                    الكمية
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-gray-800">
-                    {item.quantity}
-                  </p>
-                </div>
-
-                <div className="min-w-0 rounded-lg bg-gray-50 p-2">
-                  <p className="text-[11px] text-gray-400">
-                    سعر الوحدة
-                  </p>
-                  <p
-                    className="mt-1 break-all text-sm font-bold text-gray-800"
-                    dir="ltr"
-                  >
-                    {fmt(item.unitPrice)}
-                  </p>
-                </div>
-
-                <div className="min-w-0 rounded-lg bg-blue-50 p-2">
-                  <p className="text-[11px] text-blue-500">
-                    الإجمالي
-                  </p>
-                  <p
-                    className="mt-1 break-all text-sm font-extrabold text-blue-700"
-                    dir="ltr"
-                  >
-                    {fmt(item.unitPrice * item.quantity)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Desktop table and print table */}
-        <div className="hidden overflow-x-auto py-4 md:block print:block print:overflow-visible">
-          <table className="w-full min-w-[480px] text-right text-sm print:min-w-0">
-            <thead className="bg-gray-50 print:bg-transparent">
-              <tr>
-                <th className={ui.th}>الصنف</th>
-                <th className={ui.th}>الكمية</th>
-                <th className={ui.th}>السعر</th>
-                <th className={ui.th}>الإجمالي</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-gray-100">
-              {invoice.items.map((item) => (
-                <tr key={item.id}>
-                  <td className={`${ui.td} font-medium`}>
-                    {item.product.name}
-                  </td>
-
-                  <td className={ui.td}>
-                    {item.quantity}
-                  </td>
-
-                  <td className={ui.td}>
-                    <span dir="ltr">
-                      {fmt(item.unitPrice)}
-                    </span>
-                  </td>
-
-                  <td className={`${ui.td} font-semibold`}>
-                    <span dir="ltr">
-                      {fmt(item.unitPrice * item.quantity)}
-                    </span>
-                  </td>
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="w-full min-w-[420px] border-collapse text-right text-sm print:min-w-0">
+              <thead>
+                <tr className="border-y border-slate-200 bg-slate-50 text-slate-600 print:bg-slate-100">
+                  <th className="px-3 py-2.5 text-xs font-bold">الصنف</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold">الكمية</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-bold">سعر الوحدة</th>
+                  <th className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-bold">الإجمالي</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {invoice.items.map((item) => (
+                  <tr key={item.id} className="border-b border-slate-100">
+                    <td className="max-w-[260px] break-words px-3 py-3 text-sm font-semibold text-slate-800 print:py-2">
+                      {item.product.name}
+                    </td>
+                    <td className="px-3 py-3 text-center text-sm text-slate-700 print:py-2">
+                      {item.quantity}
+                    </td>
+                    <td className="px-3 py-3 text-center text-sm text-slate-700 print:py-2" dir="ltr">
+                      {fmt(item.unitPrice)}
+                    </td>
+                    <td className="px-3 py-3 text-left text-sm font-bold text-slate-900 print:py-2" dir="ltr">
+                      {fmt(item.unitPrice * item.quantity)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-        {/* Total */}
-        <div className="mt-1 flex items-center justify-between gap-3 border-t border-gray-200 pt-4">
-          <span className="text-sm font-semibold text-gray-600 sm:text-base">
-            إجمالي الفاتورة
-          </span>
+        {/* Totals and payment summary */}
+        <section className="mx-5 mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:mx-8 sm:p-5 print:mx-0 print:mb-0 print:rounded-none print:bg-white print:p-0">
+          {Number(invoice.discount ?? 0) > 0 && (
+            <div className="mb-2 flex items-center justify-between gap-4 text-xs text-slate-600">
+              <span>الخصم</span>
+              <span className="font-bold" dir="ltr">{fmt(Number(invoice.discount))}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm font-bold text-slate-600">إجمالي الفاتورة</span>
+            <strong className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl" dir="ltr">
+              {fmt(invoice.total)}
+            </strong>
+          </div>
 
-          <span
-            className="break-all text-2xl font-extrabold text-gray-900 sm:text-3xl"
-            dir="ltr"
-          >
-            {fmt(invoice.total)}
-          </span>
-        </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 print:mt-2 print:pt-2">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500">طريقة الدفع</p>
+              <p className="mt-1 break-words text-xs font-bold text-slate-800 sm:text-sm">{paymentLabel}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500">المدفوع</p>
+              <p className="mt-1 text-xs font-bold text-slate-800 sm:text-sm" dir="ltr">{fmt(paidAmount)}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500">المتبقي</p>
+              <p className={`mt-1 text-xs font-extrabold sm:text-sm ${remaining > 0 ? "text-rose-700" : "text-emerald-700"}`} dir="ltr">
+                {fmt(remaining)}
+              </p>
+            </div>
+          </div>
+        </section>
 
-        <div className="mt-4 hidden border-t border-gray-100 pt-3 text-center text-xs text-gray-400 print:block">
-          شكرًا لتعاملكم معنا
-        </div>
-      </div>
+        <footer className="border-t border-slate-100 px-5 py-4 text-center sm:px-8 print:px-0 print:py-3">
+          <p className="text-sm font-bold text-slate-700">شكرًا لتعاملكم معنا</p>
+          <p className="mt-1 text-[10px] text-slate-400">الصالح للتجارة والتوزيع</p>
+        </footer>
+      </article>
+
+      <style>{`
+        @page { size: A4; margin: 10mm; }
+        @media print {
+          html, body { background: #fff !important; min-width: 0 !important; }
+          body * { visibility: hidden !important; }
+          #invoice-print-area, #invoice-print-area * { visibility: visible !important; }
+          #invoice-print-area {
+            position: absolute !important;
+            top: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            border: 0 !important;
+            box-shadow: none !important;
+          }
+          .no-print { display: none !important; }
+          table { width: 100% !important; }
+          thead { display: table-header-group; }
+          tr { break-inside: avoid; page-break-inside: avoid; }
+          footer { break-inside: avoid; page-break-inside: avoid; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+      `}</style>
     </div>
   );
 }
 
+// قراءة searchParams داخل مكوّن فرعي تحت Suspense تمنع تشغيلها أثناء prerendering.
+async function InvoicePrintBehavior({
+  searchParams,
+}: {
+  searchParams: Promise<{ print?: string }>;
+}) {
+  const query = await searchParams;
+  return <AutoPrint enabled={query.print === "1"} />;
+}
+
 export default function InvoicePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ print?: string }>;
 }) {
   return (
-    <main
-      dir="rtl"
-      className={`${ui.page} min-w-0 print:p-0`}
-    >
+    <main dir="rtl" className="min-w-0 print:p-0">
+      <Suspense fallback={null}>
+        <InvoicePrintBehavior searchParams={searchParams} />
+      </Suspense>
       <Suspense
         fallback={
-          <div
-            className="h-64 animate-pulse rounded-xl bg-gray-100"
-            aria-busy="true"
-          />
+          <div className="mx-auto h-64 w-full max-w-3xl animate-pulse rounded-xl bg-slate-100" aria-busy="true" />
         }
       >
         <InvoiceContent params={params} />

@@ -4,6 +4,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type FormEvent,
@@ -50,6 +51,7 @@ type PaymentMethod = "CASH" | "WALLET" | "TRANSFER";
 type Receipt = {
   invoiceId: number;
   customer: string;
+  placeName: string;
   note: string;
   items: CartItem[];
   subtotal: number;
@@ -58,6 +60,7 @@ type Receipt = {
   date: string;
   paymentType: PaymentType;
   paymentMethod: PaymentMethod | null;
+  repName: string;
   paidAmount: number;
   remaining: number;
 };
@@ -94,11 +97,13 @@ function paymentMethodLabel(method: PaymentMethod | null) {
 type RepFormProps = {
   products?: ProductOption[];
   customers?: CustomerOption[];
+  repName?: string;
 };
 
 export default function RepForm({
   products: productsProp = [],
   customers: customersProp = [],
+  repName = "",
 }: RepFormProps) {
   // حماية من عدم تمرير القوائم من الصفحة الأم
   const products = Array.isArray(productsProp) ? productsProp : [];
@@ -110,6 +115,7 @@ export default function RepForm({
 
   const [search, setSearch] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [placeName, setPlaceName] = useState("");
   const [note, setNote] = useState("");
 
   const [stage, setStage] = useState<
@@ -126,8 +132,8 @@ export default function RepForm({
   const [paidAmountEdited, setPaidAmountEdited] = useState(false);
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
-  const [autoPrint, setAutoPrint] = useState(false);
   const [error, setError] = useState("");
+  const successRef = useRef<HTMLElement | null>(null);
 
   const [pending, startTransition] = useTransition();
 
@@ -225,15 +231,17 @@ export default function RepForm({
     (paymentType !== "CASH" && !selectedCustomer);
 
   useEffect(() => {
-    if (!autoPrint || !receipt) return;
+    if (stage !== "DONE") return;
 
-    const timer = window.setTimeout(() => {
-      window.print();
-      setAutoPrint(false);
-    }, 400);
+    const frame = window.requestAnimationFrame(() => {
+      successRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
 
-    return () => window.clearTimeout(timer);
-  }, [autoPrint, receipt]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [stage]);
 
   // ==========================================
   // CART
@@ -257,10 +265,31 @@ export default function RepForm({
     }));
   }
 
+  function setProductQuantity(
+    product: ProductOption,
+    rawValue: string
+  ) {
+    const parsed = rawValue.trim() === "" ? 0 : Number(rawValue);
+
+    if (!Number.isFinite(parsed)) return;
+
+    const quantity = Math.min(
+      product.stock,
+      Math.max(0, Math.floor(parsed))
+    );
+
+    setError("");
+    setQuantities((current) => ({
+      ...current,
+      [product.id]: quantity,
+    }));
+  }
+
   function resetSale() {
     setQuantities({});
     setSearch("");
     setCustomerId("");
+    setPlaceName("");
     setNote("");
     setPaymentType("CASH");
     setPaymentMethod("CASH");
@@ -364,6 +393,7 @@ export default function RepForm({
           customerId: customerId
             ? Number(customerId)
             : null,
+          placeName: placeName.trim() || null,
           paymentType,
           paymentMethod: roundedPaidAmount > 0 ? paymentMethod : null,
           discount: roundedDiscount,
@@ -382,6 +412,7 @@ export default function RepForm({
         setReceipt({
           invoiceId: result.invoiceId,
           customer: customerName,
+          placeName: placeName.trim(),
           note,
           items: receiptItems,
           subtotal: result.total + result.discount,
@@ -390,13 +421,13 @@ export default function RepForm({
           date: new Date().toLocaleString("en-GB"),
           paymentType,
           paymentMethod: result.paymentMethod,
+          repName,
           paidAmount: result.paidAmount,
           remaining: result.remaining,
         });
 
         resetSale();
         setStage("DONE");
-        setAutoPrint(true);
       } catch {
         setError(
           "حدث خطأ أثناء تسجيل البيع. حاول مرة أخرى."
@@ -425,6 +456,7 @@ export default function RepForm({
       ? {
           invoiceId: 0,
           customer: selectedCustomer?.name ?? "بدون عميل",
+          placeName: placeName.trim(),
           note,
           items,
           subtotal,
@@ -433,6 +465,7 @@ export default function RepForm({
           date: new Date().toLocaleString("en-GB"),
           paymentType,
           paymentMethod: roundedPaidAmount > 0 ? paymentMethod : null,
+          repName,
           paidAmount: roundedPaidAmount,
           remaining,
         }
@@ -551,36 +584,51 @@ export default function RepForm({
                         </div>
                       </button>
 
-                      {quantity > 0 && (
-                        <div className="mt-3 flex min-h-10 items-center justify-between gap-2 border-t border-gray-200 pt-3">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeQuantity(product, -1)
-                            }
-                            aria-label={`تقليل كمية ${product.name}`}
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 transition hover:bg-gray-100"
-                          >
-                            <Minus className="h-4 w-4" />
-                          </button>
+                      <div className="mt-3 flex min-h-12 items-center justify-between gap-2 border-t border-gray-200 pt-3">
+                        <button
+                          type="button"
+                          onClick={() => changeQuantity(product, -1)}
+                          disabled={quantity <= 0}
+                          aria-label={`تقليل كمية ${product.name}`}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
 
-                          <span className="text-sm font-extrabold text-gray-900">
-                            {quantity}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeQuantity(product, 1)
-                            }
-                            disabled={maxed}
-                            aria-label={`زيادة كمية ${product.name}`}
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        <div className="flex min-w-0 flex-1 flex-col items-center">
+                          <label
+                            htmlFor={`quantity-${product.id}`}
+                            className="mb-1 text-[10px] font-semibold text-gray-500"
                           >
-                            <Plus className="h-4 w-4" />
-                          </button>
+                            الكمية
+                          </label>
+                          <input
+                            id={`quantity-${product.id}`}
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max={product.stock}
+                            step="1"
+                            value={quantity}
+                            disabled={outOfStock}
+                            onChange={(event) =>
+                              setProductQuantity(product, event.target.value)
+                            }
+                            className="h-11 w-full max-w-24 rounded-xl border border-blue-200 bg-blue-50 text-center text-lg font-extrabold text-blue-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-40"
+                            aria-label={`كمية ${product.name}`}
+                          />
                         </div>
-                      )}
+
+                        <button
+                          type="button"
+                          onClick={() => changeQuantity(product, 1)}
+                          disabled={maxed || outOfStock}
+                          aria-label={`زيادة كمية ${product.name}`}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
 
                       {maxed && quantity > 0 && (
                         <p className="mt-2 text-center text-[10px] font-medium text-amber-700">
@@ -652,6 +700,27 @@ export default function RepForm({
                 aria-label="ملاحظة على عملية البيع"
                 className={`${ui.input} min-h-20 w-full resize-y`}
               />
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="rep-place-name"
+                  className="block text-sm font-bold text-gray-800"
+                >
+                  اسم المكان أو المحل على الفاتورة
+                </label>
+                <input
+                  id="rep-place-name"
+                  type="text"
+                  maxLength={120}
+                  value={placeName}
+                  onChange={(event) => setPlaceName(event.target.value)}
+                  placeholder="مثال: سوبر ماركت النور"
+                  className={`${ui.input} min-h-12 w-full`}
+                />
+                <p className="text-[11px] leading-5 text-gray-500">
+                  الاسم هيظهر في الفاتورة المطبوعة. الخانة اختيارية.
+                </p>
+              </div>
             </section>
 
             {error && (
@@ -741,16 +810,21 @@ export default function RepForm({
               </div>
 
               {/* Customer */}
-              <div className="mb-4 flex min-w-0 items-start gap-3 rounded-xl bg-gray-50 p-3">
-                <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+              <div className="mb-4 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-gray-50 p-3">
+                  <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-gray-500">العميل</p>
+                    <p className="mt-1 break-words text-sm font-bold text-gray-900">
+                      {selectedCustomer?.name ?? "بدون عميل"}
+                    </p>
+                  </div>
+                </div>
 
-                <div className="min-w-0">
-                  <p className="text-[11px] text-gray-500">
-                    العميل
-                  </p>
-
-                  <p className="mt-1 break-words text-sm font-bold text-gray-900">
-                    {selectedCustomer?.name ?? "بدون عميل"}
+                <div className="min-w-0 rounded-xl bg-blue-50 p-3">
+                  <p className="text-[11px] text-blue-600">اسم المكان على الفاتورة</p>
+                  <p className="mt-1 break-words text-sm font-bold text-blue-800">
+                    {placeName.trim() || "غير محدد"}
                   </p>
                 </div>
               </div>
@@ -1156,7 +1230,11 @@ export default function RepForm({
         {/* ================================== */}
 
         {stage === "DONE" && receipt && (
-          <section className="min-w-0 rounded-2xl border border-emerald-200 bg-white p-4 text-center shadow-sm sm:p-7">
+          <section
+            ref={successRef}
+            id="rep-sale-complete"
+            className="min-w-0 scroll-mt-24 rounded-2xl border border-emerald-200 bg-white p-4 text-center shadow-sm sm:p-7"
+          >
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 sm:h-16 sm:w-16">
               <CheckCircle2 className="h-8 w-8 sm:h-9 sm:w-9" />
             </div>
@@ -1168,6 +1246,12 @@ export default function RepForm({
             <p className="mt-2 text-sm text-gray-500">
               رقم الفاتورة #{receipt.invoiceId}
             </p>
+
+            {receipt.placeName && (
+              <p className="mt-2 text-sm font-bold text-blue-700">
+                {receipt.placeName}
+              </p>
+            )}
 
             <p className="mt-3 break-all text-3xl font-extrabold text-gray-900 sm:text-4xl">
               {formatMoney(receipt.total)}
@@ -1271,140 +1355,199 @@ export default function RepForm({
 
       {printable && (
         <div
-          className="hidden bg-white p-6 text-black print:block"
+          id="rep-invoice-print"
+          className="hidden bg-white text-slate-900 print:block"
           dir="rtl"
         >
-          <div className="mx-auto max-w-2xl">
-            <header className="border-b-2 border-black pb-4 text-center">
-              <h1 className="text-2xl font-bold">
-                نظام إدارة المخزون والمبيعات
-              </h1>
+          <style>{`
+            @page { size: A4; margin: 11mm; }
+            @media print {
+              html, body { margin: 0 !important; background: #fff !important; }
+              body * { visibility: hidden !important; }
+              #rep-invoice-print, #rep-invoice-print * { visibility: visible !important; }
+              #rep-invoice-print {
+                display: block !important;
+                position: absolute !important;
+                inset: 0 auto auto 0 !important;
+                width: 100% !important;
+                max-width: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #fff !important;
+                color: #0f172a !important;
+              }
+              #rep-invoice-print table { width: 100%; border-collapse: collapse; }
+              #rep-invoice-print thead { display: table-header-group; }
+              #rep-invoice-print tr, #rep-invoice-print .no-print-break {
+                break-inside: avoid; page-break-inside: avoid;
+              }
+              #rep-invoice-print .print-accent {
+                background: #f1f5f9 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+            }
+          `}</style>
 
-              <h2 className="mt-3 text-xl font-bold">
-                {receipt ? "فاتورة بيع" : "مسودة فاتورة بيع"}
-              </h2>
-
-              {!receipt && (
-                <p className="mt-2 inline-block border border-dashed border-gray-600 px-4 py-2 text-sm font-bold">
-                  مسودة فقط - غير نهائية
+          <div className="mx-auto w-full max-w-[190mm] text-sm leading-6">
+            {/* Invoice heading */}
+            <header className="flex items-start justify-between gap-6 border-b-2 border-slate-900 pb-4">
+              <div className="min-w-0">
+                <div className="mb-2 h-1.5 w-16 rounded-full bg-slate-900" />
+                <h1 className="text-2xl font-black tracking-tight">
+                  الصالح للتجارة والتوزيع
+                </h1>
+                <p className="mt-1 text-xs font-medium text-slate-500">
+                  نظام المخزون والمبيعات · فاتورة بيع مباشر
                 </p>
-              )}
+              </div>
+
+              <div className="w-44 shrink-0 rounded-xl border border-slate-300 px-3 py-2 text-center">
+                <p className="text-[11px] font-bold text-slate-500">
+                  {receipt ? "فاتورة نهائية" : "مسودة فاتورة"}
+                </p>
+                <p className="mt-0.5 text-xl font-black leading-7">
+                  {printable.invoiceId > 0 ? `#${printable.invoiceId}` : "—"}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-500" dir="ltr">
+                  {printable.date}
+                </p>
+              </div>
             </header>
 
-            <div className="my-5 space-y-2 text-sm">
-              <p>
-                <strong>رقم الفاتورة:</strong>{" "}
-                {printable.invoiceId > 0
-                  ? `#${printable.invoiceId}`
-                  : "لم تصدر بعد"}
-              </p>
-
-              <p>
-                <strong>العميل:</strong>{" "}
-                {printable.customer}
-              </p>
-
-              <p>
-                <strong>التاريخ:</strong>{" "}
-                {printable.date}
-              </p>
-            </div>
-
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-y-2 border-black">
-                  <th className="py-3 text-right">
-                    المنتج
-                  </th>
-
-                  <th className="py-3 text-center">
-                    الكمية
-                  </th>
-
-                  <th className="py-3 text-center">
-                    السعر
-                  </th>
-
-                  <th className="py-3 text-left">
-                    الإجمالي
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {printable.items.map((item) => (
-                  <tr
-                    key={item.productId}
-                    className="border-b border-gray-300"
-                  >
-                    <td className="py-3">
-                      {item.name}
-                    </td>
-
-                    <td className="py-3 text-center">
-                      {item.quantity}
-                    </td>
-
-                    <td className="py-3 text-center">
-                      {formatMoney(item.unitPrice)}
-                    </td>
-
-                    <td className="py-3 text-left">
-                      {formatMoney(
-                        item.quantity * item.unitPrice
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="mt-6 space-y-3 border-t-2 border-black pt-4 text-sm">
-              <p>
-                <strong>إجمالي المنتجات:</strong>{" "}
-                {formatMoney(printable.subtotal)}
-              </p>
-
-              <p>
-                <strong>الخصم:</strong>{" "}
-                -{formatMoney(printable.discount)}
-              </p>
-
-              <p className="text-lg font-extrabold">
-                صافي الفاتورة بعد الخصم: {formatMoney(printable.total)}
-              </p>
-
-              <p>
-                <strong>نوع السداد:</strong>{" "}
-                {paymentTypeLabel(printable.paymentType)}
-              </p>
-
-              <p>
-                <strong>وسيلة التحصيل:</strong>{" "}
-                {paymentMethodLabel(printable.paymentMethod)}
-              </p>
-
-              <p>
-                <strong>المدفوع:</strong>{" "}
-                {formatMoney(printable.paidAmount)}
-              </p>
-
-              <p>
-                <strong>المتبقي:</strong>{" "}
-                {formatMoney(printable.remaining)}
-              </p>
-            </div>
-
-            {printable.note && (
-              <p className="mt-5 text-sm">
-                <strong>ملاحظات:</strong>{" "}
-                {printable.note}
-              </p>
+            {!receipt && (
+              <div className="mt-3 rounded-lg border border-dashed border-amber-500 bg-amber-50 px-3 py-2 text-center text-xs font-extrabold text-amber-800">
+                مسودة للمراجعة فقط · غير صالحة كفاتورة نهائية
+              </div>
             )}
 
-            <p className="mt-12 border-t pt-4 text-center text-xs">
-              شكراً لتعاملكم معنا
-            </p>
+            {/* Customer / rep information */}
+            <section className="no-print-break mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[10px] font-semibold text-slate-500">العميل</p>
+                <p className="mt-1 break-words text-sm font-extrabold text-slate-900">
+                  {printable.customer}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[10px] font-semibold text-slate-500">مندوب المبيعات</p>
+                <p className="mt-1 break-words text-sm font-extrabold text-slate-900">
+                  {printable.repName || "—"}
+                </p>
+              </div>
+
+              {printable.placeName && (
+                <div className="col-span-2 rounded-lg border border-slate-200 p-3">
+                  <p className="text-[10px] font-semibold text-slate-500">اسم المكان / المحل</p>
+                  <p className="mt-1 break-words text-sm font-bold text-slate-900">
+                    {printable.placeName}
+                  </p>
+                </div>
+              )}
+            </section>
+
+            {/* Products */}
+            <section className="mt-5">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-xs font-extrabold text-slate-800">تفاصيل الأصناف</h2>
+                <p className="text-[10px] text-slate-500">
+                  {printable.items.length} صنف · {printable.items.reduce((sum, item) => sum + item.quantity, 0)} قطعة
+                </p>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-300">
+                <table className="w-full border-collapse text-xs">
+                  <thead className="print-accent bg-slate-100">
+                    <tr className="border-b border-slate-300">
+                      <th className="w-9 px-2 py-2 text-center font-extrabold">م</th>
+                      <th className="px-3 py-2 text-right font-extrabold">الصنف</th>
+                      <th className="w-16 px-2 py-2 text-center font-extrabold">الكمية</th>
+                      <th className="w-24 px-2 py-2 text-center font-extrabold">سعر الوحدة</th>
+                      <th className="w-24 px-2 py-2 text-left font-extrabold">الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {printable.items.map((item, index) => (
+                      <tr key={item.productId} className="border-b border-slate-200 last:border-b-0">
+                        <td className="px-2 py-2 text-center text-slate-500">{index + 1}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-900">{item.name}</td>
+                        <td className="px-2 py-2 text-center tabular-nums">{item.quantity}</td>
+                        <td className="px-2 py-2 text-center tabular-nums" dir="ltr">{formatMoney(item.unitPrice)}</td>
+                        <td className="px-2 py-2 text-left font-bold tabular-nums" dir="ltr">
+                          {formatMoney(item.quantity * item.unitPrice)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {/* Totals and payment */}
+            <section className="no-print-break mt-4 grid grid-cols-2 gap-4">
+              <div className="space-y-2 rounded-lg border border-slate-200 p-3 text-xs">
+                <h2 className="mb-2 text-xs font-extrabold text-slate-800">بيانات السداد</h2>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-slate-500">نوع السداد</span>
+                  <strong className="text-left">{paymentTypeLabel(printable.paymentType)}</strong>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-slate-500">وسيلة التحصيل</span>
+                  <strong className="text-left">{paymentMethodLabel(printable.paymentMethod)}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-2">
+                  <span className="text-slate-500">المدفوع</span>
+                  <strong className="tabular-nums" dir="ltr">{formatMoney(printable.paidAmount)}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">المتبقي</span>
+                  <strong className={`tabular-nums ${printable.remaining > 0 ? "text-red-700" : "text-emerald-700"}`} dir="ltr">
+                    {formatMoney(printable.remaining)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-slate-200 p-3 text-xs">
+                <h2 className="mb-2 text-xs font-extrabold text-slate-800">ملخص الفاتورة</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">إجمالي المنتجات</span>
+                  <strong className="tabular-nums" dir="ltr">{formatMoney(printable.subtotal)}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">الخصم</span>
+                  <strong className="tabular-nums" dir="ltr">-{formatMoney(printable.discount)}</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2 border-t-2 border-slate-900 pt-2">
+                  <span className="font-extrabold text-slate-900">صافي الفاتورة</span>
+                  <strong className="text-lg font-black tabular-nums" dir="ltr">{formatMoney(printable.total)}</strong>
+                </div>
+              </div>
+            </section>
+
+            {printable.note && (
+              <section className="no-print-break mt-4 rounded-lg border border-slate-200 p-3 text-xs">
+                <p className="font-extrabold text-slate-700">ملاحظات</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-slate-600">{printable.note}</p>
+              </section>
+            )}
+
+            {/* Signatures and footer */}
+            <footer className="no-print-break mt-7 border-t border-slate-300 pt-3">
+              <div className="grid grid-cols-2 gap-8 text-center text-[10px] text-slate-500">
+                <div>
+                  <p className="font-bold text-slate-700">توقيع المندوب</p>
+                  <div className="mx-auto mt-7 w-3/4 border-b border-slate-300" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-700">توقيع العميل</p>
+                  <div className="mx-auto mt-7 w-3/4 border-b border-slate-300" />
+                </div>
+              </div>
+              <p className="mt-5 text-center text-xs font-semibold text-slate-600">
+                شكرًا لتعاملكم معنا · الصالح للتجارة والتوزيع
+              </p>
+            </footer>
           </div>
         </div>
       )}

@@ -55,6 +55,7 @@ model Customer {
 model Invoice {
   id            Int      @id @default(autoincrement())
   date          DateTime @default(now())
+  placeName     String?
   total         Float    @default(0) // الإجمالي النهائي بعد الخصم
   discount      Float    @default(0) // قيمة الخصم الممنوح
   paidAmount    Float    @default(0)

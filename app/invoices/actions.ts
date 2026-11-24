@@ -14,6 +14,7 @@ type Input = {
   paymentType?: PaymentType;
   paymentMethod?: PaymentMethod | null;
   paidAmount?: number;
+  placeName?: string | null;
   items: {
     productId: number;
     quantity: number;
@@ -65,6 +66,22 @@ export async function createInvoice(input: Input): Promise<Result> {
     (!Number.isSafeInteger(input.customerId) || input.customerId <= 0)
   ) {
     return { ok: false, error: "بيانات العميل غير صحيحة" };
+  }
+
+  if (
+    input.placeName != null &&
+    typeof input.placeName !== "string"
+  ) {
+    return { ok: false, error: "اسم المكان غير صحيح" };
+  }
+
+  const placeName = (input.placeName ?? "").trim();
+
+  if (placeName.length > 120) {
+    return {
+      ok: false,
+      error: "اسم المكان لا يمكن أن يتجاوز 120 حرفًا",
+    };
   }
 
   if (!Array.isArray(input.items) || input.items.length === 0) {
@@ -138,9 +155,28 @@ export async function createInvoice(input: Input): Promise<Result> {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      if (input.customerId !== null) {
+      // أي عملية نقدية بدون عميل محدد تُربط بعميل افتراضي موحّد.
+      let invoiceCustomerId = input.customerId;
+
+      if (paymentType === "CASH" && invoiceCustomerId === null) {
+        const existingCashCustomer = await tx.customer.findFirst({
+          where: { name: "عميل نقدي" },
+          orderBy: { id: "asc" },
+          select: { id: true },
+        });
+
+        const cashCustomer = existingCashCustomer ??
+          await tx.customer.create({
+            data: { name: "عميل نقدي" },
+            select: { id: true },
+          });
+
+        invoiceCustomerId = cashCustomer.id;
+      }
+
+      if (invoiceCustomerId !== null) {
         const customer = await tx.customer.findUnique({
-          where: { id: input.customerId },
+          where: { id: invoiceCustomerId },
           select: { id: true },
         });
 
@@ -322,7 +358,8 @@ export async function createInvoice(input: Input): Promise<Result> {
       const invoice = await tx.invoice.create({
         data: {
           date: saleDate,
-          customerId: input.customerId,
+          placeName: placeName || null,
+          customerId: invoiceCustomerId,
           userId: session.userId,
           total,
           discount,
@@ -336,13 +373,13 @@ export async function createInvoice(input: Input): Promise<Result> {
       });
 
       // تسجيل الدفعة الأولى ووسيلة التحصيل في نفس العملية.
-      if (paidCents > 0 && input.customerId !== null) {
+      if (paidCents > 0 && invoiceCustomerId !== null) {
         await tx.payment.create({
           data: {
             amount: paidAmount,
             paymentMethod,
             note: `دفعة عند إصدار الفاتورة #${invoice.id}`,
-            customerId: input.customerId,
+            customerId: invoiceCustomerId,
             invoiceId: invoice.id,
             repId: session.userId,
           },
